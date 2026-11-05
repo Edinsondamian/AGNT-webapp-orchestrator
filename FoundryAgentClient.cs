@@ -1,9 +1,12 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using Azure.Core;
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
 using Azure.Identity;
+using OpenAI;
+using OpenAI.Responses;
 
 #pragma warning disable OPENAI001
 
@@ -16,6 +19,7 @@ public sealed class FoundryAgentClient
     private readonly bool _useMock;
     private readonly string _endpoint;
     private readonly Lazy<AIProjectClient> _lazyClient;
+    private readonly ConcurrentDictionary<string, string> _conversationThreads = new();
 
     public FoundryAgentClient(IConfiguration config, ILogger<FoundryAgentClient> logger)
     {
@@ -24,7 +28,6 @@ public sealed class FoundryAgentClient
         _endpoint = _config["AzureAIFoundry:Endpoint"] ?? string.Empty;
         _useMock = _config.GetValue<bool>("AzureAIFoundry:UseMock", false) || string.IsNullOrWhiteSpace(_endpoint);
 
-        // Asegurar que Azure CLI esté en el PATH
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         if (!path.Contains("Azure\\CLI2\\wbin", StringComparison.OrdinalIgnoreCase) &&
             Directory.Exists(@"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"))
@@ -37,7 +40,6 @@ public sealed class FoundryAgentClient
             TokenCredential credential;
             try
             {
-                // Autenticación directa y rápida con az login
                 credential = new AzureCliCredential();
             }
             catch
@@ -52,7 +54,7 @@ public sealed class FoundryAgentClient
         });
     }
 
-    public async Task<string> RunAgentAsync(string agentName, string message, CancellationToken ct = default)
+    public async Task<string> RunAgentAsync(string agentName, string message, string? conversationKey = null, CancellationToken ct = default)
     {
         if (_useMock)
         {
@@ -64,7 +66,27 @@ public sealed class FoundryAgentClient
         {
             _logger.LogInformation("[Foundry Cloud] Invocando agente '{Agent}' en Azure AI Foundry...", agentName);
             var projectClient = _lazyClient.Value;
-            var responseClient = projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName);
+            var agentClient = projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName);
+
+            string? azureConvId = null;
+            if (!string.IsNullOrEmpty(conversationKey))
+            {
+                if (!_conversationThreads.TryGetValue(conversationKey, out azureConvId))
+                {
+                    var conversationClient = new ProjectConversationsClient(
+                        agentClient.Pipeline,
+                        new OpenAIClientOptions { Endpoint = agentClient.Endpoint });
+
+                    var newConv = await Task.Run(() => conversationClient.CreateProjectConversation(), ct);
+                    azureConvId = newConv.Value.Id;
+                    _conversationThreads[conversationKey] = azureConvId;
+                    _logger.LogInformation("[Foundry Cloud] Nueva conversación creada en Azure: {ConvId}", azureConvId);
+                }
+            }
+
+            var responseClient = string.IsNullOrEmpty(azureConvId)
+                ? agentClient
+                : projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName, defaultConversationId: azureConvId);
 
             var response = await Task.Run(() => responseClient.CreateResponse(message), ct);
             var rawOutput = response.Value.GetOutputText();
@@ -83,7 +105,6 @@ public sealed class FoundryAgentClient
         if (string.IsNullOrWhiteSpace(rawOutput))
             return "No se obtuvo respuesta del agente.";
 
-        // Si el agente crediticio devolvió JSON estructurado, formatearlo elegantemente para el chat
         try
         {
             using var doc = JsonDocument.Parse(rawOutput);
@@ -98,18 +119,23 @@ public sealed class FoundryAgentClient
                 var cuota = root.TryGetProperty("cuotaEstimada", out var c) ? c.GetDecimal().ToString("N2", CultureInfo.InvariantCulture) : "0.00";
                 var valId = root.TryGetProperty("idValidacion", out var v) ? v.GetString() : "-";
 
+                string observacion = "";
+                if (root.TryGetProperty("observaciones", out var obsArray) && obsArray.GetArrayLength() > 0)
+                {
+                    observacion = $"\n• **Observación**: {obsArray[0].GetString()}";
+                }
+
                 return $"{icon} **Evaluación Crediticia — Azure AI Foundry**\n\n" +
                        $"• **Resultado**: {resultado}\n" +
                        $"• **Score crediticio**: {score} (Riesgo: {riesgo})\n" +
                        $"• **Monto aprobado**: S/ {monto} PEN\n" +
                        $"• **Cuota estimada**: S/ {cuota} / mes\n" +
-                       $"• **Validación**: {valId}\n" +
+                       $"• **Validación**: {valId}{observacion}\n" +
                        $"• **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.";
             }
         }
         catch
         {
-            // No es JSON, devolver el texto tal cual
         }
 
         return rawOutput;
