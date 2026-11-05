@@ -33,7 +33,7 @@ app.MapPost("/api/messages", async (
     var botAccount = new BotAccount(activity.Recipient?.Id ?? "bot", activity.Recipient?.Name ?? "Test Bot", "bot");
     var userAccount = new BotAccount(activity.From?.Id ?? "user", activity.From?.Name ?? "Usuario", "user");
 
-    // 1. Manejo de bienvenida (al abrir el chat o unirse)
+    // 1. Manejo de bienvenida
     if (string.Equals(activity.Type, "conversationUpdate", StringComparison.OrdinalIgnoreCase))
     {
         var welcome = "¡Hola! 👋 Bienvenido al Asistente de Evaluación Crediticia en Microsoft 365 Agents Playground.\n\n" +

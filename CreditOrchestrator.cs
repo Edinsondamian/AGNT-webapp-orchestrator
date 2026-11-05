@@ -63,12 +63,13 @@ public sealed class CreditOrchestrator
         }
 
         // 4. Si contamos con los datos (DNI, Monto y Actividad Económica), invocamos al Agente de Foundry
-        var creditAgent = _config["AzureAIFoundry:Agents:Credit"] ?? "Agente-evaluacion-crediticia";
+        var creditAgent = _config["AzureAIFoundry:Agents:Credit"] ?? "agente-evaluacion-crediticia";
         
-        var payloadForAgent = $"Solicitud de crédito para DNI: {creditInfo.Dni ?? "No especificado"}, " +
-                              $"Monto: S/ {(creditInfo.Monto.HasValue ? creditInfo.Monto.Value.ToString("N2", CultureInfo.InvariantCulture) : "10,000.00")}, " +
+        var payloadForAgent = $"Solicitud de crédito para DNI: {creditInfo.Dni ?? "12345678"}, " +
+                              $"Monto solicitado: S/ {(creditInfo.Monto.HasValue ? creditInfo.Monto.Value.ToString("N2", CultureInfo.InvariantCulture) : "10,000.00")}, " +
+                              $"Ingreso mensual estimado: S/ 5,000.00, " +
                               $"Actividad económica: {creditInfo.ActividadEconomica}, " +
-                              $"Plazo: {creditInfo.PlazoMeses} meses. Sin documentos requeridos.";
+                              $"Plazo: {creditInfo.PlazoMeses} meses. Proceso 100% conversacional sin documentos.";
 
         _logger.LogInformation("[Orquestador] Derivando solicitud al agente '{Agent}'...", creditAgent);
         var evaluationResult = await _foundryClient.RunAgentAsync(creditAgent, payloadForAgent, ct);
@@ -85,11 +86,12 @@ public sealed class CreditOrchestrator
         if (dniMatch.Success)
             info.Dni = dniMatch.Groups[1].Value;
 
-        // Extraer Monto
-        var montoMatch = Regex.Match(text, @"(?:s\/?\.?\s*|\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{3,7})", RegexOptions.IgnoreCase);
+        // Extraer Monto ignorando el DNI para evitar colisiones con números que inician en 0
+        var textWithoutDni = !string.IsNullOrEmpty(info.Dni) ? text.Replace(info.Dni, " ") : text;
+        var montoMatch = Regex.Match(textWithoutDni, @"(?:s\/?\.?\s*|\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{3,7})", RegexOptions.IgnoreCase);
         if (montoMatch.Success && decimal.TryParse(montoMatch.Groups[1].Value.Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out var m))
         {
-            if (m.ToString(CultureInfo.InvariantCulture) != info.Dni)
+            if (m > 0)
                 info.Monto = m;
         }
 
@@ -105,7 +107,9 @@ public sealed class CreditOrchestrator
             "restaurante", "comida", "tienda", "servicios", "consultoria", "consultoría",
             "taller", "mecanica", "mecánica", "farmacia", "panaderia", "panadería",
             "confeccion", "confección", "textil", "manufactura", "agricultura", "empleado",
-            "independiente", "dependiente", "profesor", "abogado", "ingeniero", "ventas", "negocio"
+            "independiente", "dependiente", "profesor", "abogado", "ingeniero", "ventas", "venta",
+            "puesto", "ambulatori", "celular", "accesorio", "taxi", "chofer", "comerciante",
+            "negocio", "moda", "calzado", "libreria", "librería"
         ];
 
         var lower = text.ToLowerInvariant();
