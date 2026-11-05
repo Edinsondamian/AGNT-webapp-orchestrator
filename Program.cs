@@ -21,15 +21,12 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = string.Empty;
 });
 
-// =========================================================================
-// 1. Endpoint para Microsoft 365 Agents Playground (@microsoft/m365agentsplayground)
-// =========================================================================
+
 app.MapPost("/api/messages", async (
     [FromBody] BotActivity activity,
     CreditOrchestrator orchestrator,
     CancellationToken ct) =>
 {
-    // Bienvenida al unirse en Microsoft 365 Agents Playground
     if (string.Equals(activity.Type, "conversationUpdate", StringComparison.OrdinalIgnoreCase))
     {
         var welcome = "¡Hola! 👋 Bienvenido al Asistente de Evaluación Crediticia en Microsoft 365 Agents Playground. " +
@@ -39,7 +36,6 @@ app.MapPost("/api/messages", async (
         return Results.Ok(new BotResponse("message", welcome, activity.Conversation));
     }
 
-    // Mensaje del usuario
     var userText = activity.Text?.Trim() ?? string.Empty;
     var convId = activity.Conversation?.Id;
 
@@ -51,9 +47,7 @@ app.MapPost("/api/messages", async (
 .WithTags("Microsoft 365 Agents Playground")
 .WithSummary("Endpoint para conectar con @microsoft/m365agentsplayground");
 
-// =========================================================================
-// 2. Endpoint REST estándar para pruebas directas vía Postman / curl
-// =========================================================================
+
 app.MapPost("/api/chat", async (
     [FromBody] ChatRequest request,
     CreditOrchestrator orchestrator,
@@ -65,10 +59,5 @@ app.MapPost("/api/chat", async (
 .WithName("ChatApi")
 .WithTags("Orchestrator")
 .WithSummary("Endpoint REST para enviar consultas al orquestador");
-
-// =========================================================================
-// 3. Health Check
-// =========================================================================
-app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
 
 app.Run();

@@ -53,7 +53,7 @@ public sealed class CreditOrchestrator
             return new ChatResponse(reply, conversationId, generalAgent);
         }
 
-        // 3. REGLA CLAVE: Solicitar obligatoriamente la actividad económica si no fue indicada
+        // 3. Solicitar obligatoriamente la actividad económica si no fue indicada
         if (string.IsNullOrWhiteSpace(creditInfo.ActividadEconomica))
         {
             var askActivity = "¡Hola! Para realizar tu evaluación crediticia sin requerir ningún documento físico ni papeleos, " +

@@ -1,6 +1,5 @@
 namespace AGNT.WebappOrchestrator;
 
-// Modelos para Microsoft 365 Agents Playground (@microsoft/m365agentsplayground)
 public sealed record BotActivity(
     string? Type,
     string? Id,
@@ -18,7 +17,6 @@ public sealed record BotResponse(
     string Text,
     BotConversation? Conversation = null);
 
-// Modelos para API REST estándar
 public sealed record ChatRequest(
     string? Message,
     string? ConversationId = null);
@@ -29,7 +27,6 @@ public sealed record ChatResponse(
     string Agent,
     bool Success = true);
 
-// Modelo para evaluación crediticia
 public sealed class CreditInfo
 {
     public string? Dni { get; set; }
