@@ -35,20 +35,35 @@ public sealed class CreditOrchestrator
                 "Orquestador");
         }
 
-        // 1. Detección de entidades conversacionales (DNI, Monto, Actividad Económica)
+        var lower = cleanMessage.ToLowerInvariant();
+
+        // 1. Detectar si es una consulta informativa (requisitos, condiciones, cómo funciona, tasas)
+        bool isInformational = lower.Contains("requisito") || lower.Contains("condicion") || lower.Contains("condición")
+                               || lower.Contains("documento") || lower.Contains("papel") || lower.Contains("tasa")
+                               || lower.Contains("interes") || lower.Contains("interés") || lower.Contains("como funciona")
+                               || lower.Contains("cómo funciona") || lower.Contains("informacion") || lower.Contains("información");
+
+        // 2. Detección de entidades conversacionales (DNI, Monto, Actividad Económica)
         var creditInfo = ExtractCreditEntities(cleanMessage);
 
-        var lower = cleanMessage.ToLowerInvariant();
-        bool hasCreditIntent = creditInfo.Dni != null 
-                               || creditInfo.Monto != null
-                               || lower.Contains("credito") || lower.Contains("crédito")
-                               || lower.Contains("prestamo") || lower.Contains("préstamo")
-                               || lower.Contains("evalua") || lower.Contains("financiar");
+        bool hasExplicitCreditRequest = creditInfo.Dni != null && creditInfo.Monto != null;
+        bool hasCreditKeywords = lower.Contains("solicito") || lower.Contains("necesito") || lower.Contains("quiero")
+                                 || lower.Contains("deseo") || lower.Contains("prestamo") || lower.Contains("préstamo");
 
-        // 2. Si no hay intención de crédito y es saludo o consulta general
-        if (!hasCreditIntent)
+        // Si es una pregunta de requisitos/información y no incluye DNI ni monto, va al agente documental
+        if (isInformational && !hasExplicitCreditRequest)
         {
-            var generalAgent = _config["AzureAIFoundry:Agents:General"] ?? "Agente-consultas-generales";
+            var generalAgent = _config["AzureAIFoundry:Agents:General"] ?? "Agente-evaluacion-documental";
+            _logger.LogInformation("[Orquestador] Consulta informativa. Derivando a '{Agent}'...", generalAgent);
+            var reply = await _foundryClient.RunAgentAsync(generalAgent, cleanMessage, ct);
+            return new ChatResponse(reply, conversationId, generalAgent);
+        }
+
+        // Si es un saludo simple o mensaje general sin intención de crédito
+        if (!hasExplicitCreditRequest && !hasCreditKeywords && creditInfo.Dni == null && creditInfo.Monto == null)
+        {
+            var generalAgent = _config["AzureAIFoundry:Agents:General"] ?? "Agente-evaluacion-documental";
+            _logger.LogInformation("[Orquestador] Mensaje general. Derivando a '{Agent}'...", generalAgent);
             var reply = await _foundryClient.RunAgentAsync(generalAgent, cleanMessage, ct);
             return new ChatResponse(reply, conversationId, generalAgent);
         }
@@ -88,7 +103,7 @@ public sealed class CreditOrchestrator
 
         // Extraer Monto ignorando el DNI para evitar colisiones con números que inician en 0
         var textWithoutDni = !string.IsNullOrEmpty(info.Dni) ? text.Replace(info.Dni, " ") : text;
-        var montoMatch = Regex.Match(textWithoutDni, @"(?:s\/?\.?\s*|\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{3,7})", RegexOptions.IgnoreCase);
+        var montoMatch = Regex.Match(textWithoutDni, @"(?:s\/?\.?\s*|\$)?\b(\d{1,7}(?:,\d{3})*(?:\.\d+)?)\b", RegexOptions.IgnoreCase);
         if (montoMatch.Success && decimal.TryParse(montoMatch.Groups[1].Value.Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out var m))
         {
             if (m > 0)
