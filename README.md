@@ -13,11 +13,12 @@ Proyecto **ligero, desacoplado y sin sobre-ingeniería** para la orquestación c
    - **Documento de Identidad (DNI)**: 8 dígitos numéricos.
    - **Monto Solicitado**: en Soles (PEN) o Dólares (USD).
    - **Actividad Económica / Negocio**: Rubro o fuente de ingresos (ej. bodega, transporte, restaurante, etc.).
-3. **Enrutamiento Inteligente a Azure AI Foundry**:
-   - **Consultas informativas y requisitos (sin DNI)** ➔ Enrutadas a `Agente-evaluacion-documental`.
-   - **Evaluación crediticia y flujo conversacional** ➔ Enrutadas a `agente-evaluacion-crediticia` en Azure AI Foundry, el cual valida en tiempo real con una herramienta OpenAPI de listas negras (`GetDocumentStatus`) y genera el scoring con cuotas estimadas.
-4. **Memoria Multi-Turno Nativa**:
-   - El orquestador mantiene el hilo de conversación (`ProjectConversation`) con Azure AI Foundry, permitiendo que el usuario entregue los datos en uno o varios turnos sin perder el contexto.
+3. **Arquitectura Agéntica Directa (Sin Regex ni Reglas Rígidas)**:
+   - Se eliminaron las expresiones regulares y los parsers de texto deterministas en C#.
+   - Los mensajes se canalizan directamente al agente cognitivo **`agente-evaluacion-crediticia`** en Azure AI Foundry, permitiendo que el modelo (`gpt-5.6-luna`) entienda lenguaje natural, intenciones mixtas, saludos, dudas de requisitos y evaluaciones crediticias de forma integral.
+   - El agente valida en tiempo real con una herramienta OpenAPI de listas negras (`GetDocumentStatus`) y genera el scoring con cuotas estimadas.
+4. **Memoria Multi-Turno Nativa Unificada**:
+   - El orquestador mantiene el hilo de conversación (`ProjectConversation`) con Azure AI Foundry, asegurando que el contexto y los datos entregados por turnos se preserven sin fragmentación.
 
 ---
 
@@ -26,7 +27,7 @@ Proyecto **ligero, desacoplado y sin sobre-ingeniería** para la orquestación c
 ```text
 AGNT-webapp-orchestrator-simplificado/
 ├── Program.cs             # Minimal API: Endpoints /api/messages y /api/chat + Callback al conector M365
-├── CreditOrchestrator.cs  # Orquestador: análisis de intención, detección de DNI y enrutamiento inteligente
+├── CreditOrchestrator.cs  # Orquestador: despacho directo y preservación de sesión con Azure AI Foundry
 ├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads nativos y formateo JSON)
 ├── Models.cs              # Contratos Bot Framework Activity y modelos de transporte REST
 ├── appsettings.json       # Configuración del endpoint de Foundry y nombres de agentes
@@ -41,12 +42,11 @@ AGNT-webapp-orchestrator-simplificado/
 ```mermaid
 flowchart TD
     A["👤 Usuario / M365 Agents Playground"] <-->|"Bot Framework Activity Protocol<br/>POST /api/messages"| B["⚡ Program.cs<br/>(Minimal API + Callback TrySendToConnectorAsync)"]
-    B <--> C["🧠 CreditOrchestrator.cs<br/>(Enrutamiento por Intención + Preservación de Sesión)"]
+    B <--> C["🧠 CreditOrchestrator.cs<br/>(Despacho Directo + Preservación de Sesión)"]
     C <--> D["☁️ FoundryAgentClient.cs<br/>(Azure.AI.Projects SDK + AzureCliCredential)"]
     D <-->|"API Responses & ProjectConversation"| E["🤖 Azure AI Foundry<br/>(proy-agentes-poc)"]
-    E -->|"Dudas / Requisitos"| F["📄 Agente-evaluacion-documental"]
-    E -->|"Evaluación y Scoring"| G["💳 agente-evaluacion-crediticia"]
-    G <-->|"Tool OpenAPI: GetDocumentStatus"| H["🛡️ API Blacklist Externa<br/>(Validación de Clientes Habilitados)"]
+    E -->|"Evaluación, Scoring y Diálogo"| F["💳 agente-evaluacion-crediticia"]
+    F <-->|"Tool OpenAPI: GetDocumentStatus"| G["🛡️ API Blacklist Externa<br/>(Validación de Clientes Habilitados)"]
 ```
 
 ### 1. `Program.cs`
@@ -56,16 +56,18 @@ flowchart TD
 - **`TrySendToConnectorAsync`**: Despacha la respuesta mediante HTTP POST directamente al conector local del Playground (`{serviceUrl}/v3/conversations/{convId}/activities`), permitiendo que la interfaz de Teams dibuje la burbuja de chat en tiempo real.
 - **`POST /api/chat`**: Endpoint REST alternativo para pruebas directas desde Swagger (`http://localhost:5000`) o Postman.
 
-### 2. `CreditOrchestrator.cs`
-- **Análisis de Intención**:
-  - Si el usuario realiza una consulta sobre requisitos, tasas o condiciones generales y no incluye un DNI, deriva automáticamente a `Agente-evaluacion-documental`.
-  - Si el mensaje incluye un DNI, solicita evaluación o forma parte de la conversación financiera, lo deriva a `agente-evaluacion-crediticia`.
-- **Desacoplamiento Total**: La lógica cognitiva y los prompts no están quemados en C#; residen en Azure AI Foundry para fácil gobernanza y actualización.
+### 2. `CreditOrchestrator.cs` (100% Agéntico — Cero Regex)
+- **Desacoplamiento Total**: Elimina el uso de expresiones regulares frágiles o listas de palabras clave para "adivinar" la intención del usuario.
+- **Canalización Directa**: Valida entradas vacías y canaliza la conversación directamente al agente en Azure AI Foundry, preservando el identificador del hilo conversacional.
+- **Ventajas de este diseño**:
+  - **Cero Falsos Positivos**: Números de teléfono, montos o códigos postales ya no se confunden con DNIs mediante regex.
+  - **Tolerancia a Faltas Ortográficas y Jergas**: El LLM entiende cualquier variación lingüística de forma natural.
+  - **Memoria Unificada**: Todo el diálogo se mantiene en el mismo hilo (`ProjectConversation`), evitando que saltos entre agentes borren el contexto del usuario.
 
 ### 3. `FoundryAgentClient.cs`
-- **Autenticación Segura con `AzureCliCredential`**: Se autentica utilizando las credenciales activas de Azure CLI (`az login`), evitando exponer llaves estáticas o secretos en el código.
-- **Gestión de Hilos Multi-Turno (`ProjectConversationsClient`)**: Mantiene un diccionario en memoria (`ConcurrentDictionary<string, string>`) que enlaza el `conversationId` del chat con el hilo nativo de Azure AI Foundry, garantizando que el agente recuerde turnos anteriores.
-- **Formateo Visual de Salida (`FormatAgentOutput`)**: Detecta cuando el agente en Foundry responde en formato JSON estructurado y lo convierte en una tarjeta de presentación con formato Markdown e íconos (`✅`, `⚠️`, cuota mensual y código de validación).
+- **Autenticación Segura con `AzureCliCredential`**: Se autentica utilizando las credenciales activas de Azure CLI (`az login`), sin llaves estáticas ni secretos quemados en el código.
+- **Gestión de Hilos Multi-Turno (`ProjectConversationsClient`)**: Mantiene un diccionario en memoria (`ConcurrentDictionary<string, string>`) que enlaza el `conversationId` del chat con el hilo nativo de Azure AI Foundry.
+- **Formateo Visual de Salida (`FormatAgentOutput`)**: Detecta cuando el agente en Foundry responde en formato JSON estructurado y lo convierte en una tarjeta legible para Teams con formato Markdown e íconos (`✅`, `⚠️`, cuota mensual y código de validación).
 - **Modo Contingencia (`UseMock`)**: Permite alternar a simulación local para desarrollo desconectado.
 
 ### 4. `Models.cs`
@@ -139,18 +141,18 @@ Se abrirá automáticamente el navegador con la interfaz de chat emulando Micros
 A continuación se detallan los escenarios validados en vivo contra Azure AI Foundry:
 
 ### Caso 1: Bienvenida al Entrar al Chat
-* **Evento**: El usuario abre la conversación.
+* **Evento**: El usuario abre la conversación en el Playground.
 * **Respuesta del Bot**:
   > ¡Hola! 👋 Bienvenido al Asistente de Evaluación Crediticia en Microsoft 365 Agents Playground.  
   > Para evaluar tu crédito 100% digital (sin requerir documentos físicos ni papeleos), por favor indícame tu **número de DNI**, el **monto** que deseas solicitar y tu **actividad económica**.
 
 ---
 
-### Caso 2: Consulta Informativa de Requisitos (Sin DNI)
-* **Entrada**: `Hola, ¿qué requisitos y condiciones piden para acceder a un crédito con ustedes?`
-* **Agente**: `Agente-evaluacion-documental`
+### Caso 2: Saludo Conversacional y Chitchat
+* **Entrada**: `Hola, buenas tardes`
+* **Agente**: `agente-evaluacion-crediticia`
 * **Respuesta Esperada**:
-  > Hola. Los requisitos para solicitar un crédito dependen de la entidad y del tipo de crédito, pero generalmente incluyen: Documento de identidad vigente, comprobante de ingresos, historial favorable...
+  > *¡Hola! Buenas tardes 😊 ¿Cómo estás? ¿En qué puedo ayudarte hoy?*
 
 ---
 
@@ -179,7 +181,7 @@ A continuación se detallan los escenarios validados en vivo contra Azure AI Fou
 ---
 
 ### Caso 5: Conversación Multi-Turno (Memoria Contextual)
-Demuestra que el orquestador y Azure AI Foundry conservan el contexto de la sesión:
+Demuestra que el orquestador y Azure AI Foundry conservan el contexto de la sesión sin pérdida de datos:
 
 * **Turno 1 (Usuario)**: `hola, mi dni es 12345678`
 * **Respuesta Turno 1 (Bot)**:
@@ -193,13 +195,6 @@ Demuestra que el orquestador y Azure AI Foundry conservan el contexto de la sesi
   > • **Cuota estimada**: S/ 93.11 / mes  
   > • **Validación**: VAL-20261105-000012  
   > • **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.
-
----
-
-### Caso 6: Chitchat / Saludo Amigable
-* **Entrada**: `Hola como estas?`
-* **Respuesta Esperada**:
-  > *¡Hola! Muy bien, gracias 😊 ¿Y tú, cómo estás?*
 
 ---
 
