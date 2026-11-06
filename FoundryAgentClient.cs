@@ -14,49 +14,29 @@ namespace AGNT.WebappOrchestrator;
 
 public sealed class FoundryAgentClient
 {
-    private readonly IConfiguration _config;
     private readonly ILogger<FoundryAgentClient> _logger;
     private readonly bool _useMock;
-    private readonly string _endpoint;
-    private readonly Lazy<AIProjectClient> _lazyClient;
+    private readonly AIProjectClient? _client;
     private readonly ConcurrentDictionary<string, string> _conversationThreads = new();
 
+    // Inicializamos el proyecto con credenciales locales o si tiene mock activado
     public FoundryAgentClient(IConfiguration config, ILogger<FoundryAgentClient> logger)
     {
-        _config = config;
         _logger = logger;
-        _endpoint = _config["AzureAIFoundry:Endpoint"] ?? string.Empty;
-        _useMock = _config.GetValue<bool>("AzureAIFoundry:UseMock", false) || string.IsNullOrWhiteSpace(_endpoint);
+        var endpoint = config["AzureAIFoundry:Endpoint"];
+        _useMock = config.GetValue<bool>("AzureAIFoundry:UseMock", false) || string.IsNullOrWhiteSpace(endpoint);
 
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        if (!path.Contains("Azure\\CLI2\\wbin", StringComparison.OrdinalIgnoreCase) &&
-            Directory.Exists(@"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"))
+        if (!_useMock)
         {
-            Environment.SetEnvironmentVariable("PATH", path + @";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin");
+            _client = new AIProjectClient(new Uri(endpoint!), new AzureCliCredential());
         }
-
-        _lazyClient = new Lazy<AIProjectClient>(() =>
-        {
-            TokenCredential credential;
-            try
-            {
-                credential = new AzureCliCredential();
-            }
-            catch
-            {
-                credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-                {
-                    ExcludeManagedIdentityCredential = true
-                });
-            }
-
-            return new AIProjectClient(new Uri(_endpoint), credential);
-        });
     }
+
+    // Memoria de conversaciones, para que el agente pueda recordar mensajes previos y mantener el contexto de la conversación.
 
     public async Task<string> RunAgentAsync(string agentName, string message, string? conversationKey = null, CancellationToken ct = default)
     {
-        if (_useMock)
+        if (_useMock || _client == null)
         {
             _logger.LogInformation("[Foundry Mock] Simulando respuesta de agente '{Agent}' para mensaje: {Message}", agentName, message);
             return GenerateMockResponse(agentName, message);
@@ -65,8 +45,7 @@ public sealed class FoundryAgentClient
         try
         {
             _logger.LogInformation("[Foundry Cloud] Invocando agente '{Agent}' en Azure AI Foundry...", agentName);
-            var projectClient = _lazyClient.Value;
-            var agentClient = projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName);
+            var agentClient = _client.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName);
 
             string? azureConvId = null;
             if (!string.IsNullOrEmpty(conversationKey))
@@ -86,7 +65,7 @@ public sealed class FoundryAgentClient
 
             var responseClient = string.IsNullOrEmpty(azureConvId)
                 ? agentClient
-                : projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName, defaultConversationId: azureConvId);
+                : _client.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName, defaultConversationId: azureConvId);
 
             var response = await Task.Run(() => responseClient.CreateResponse(message), ct);
             var rawOutput = response.Value.GetOutputText();
