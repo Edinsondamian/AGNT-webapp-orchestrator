@@ -76,19 +76,26 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
         if (string.IsNullOrWhiteSpace(rawOutput))
             return Constants.Messages.NoAgentResponse;
 
-        try
+        var trimmed = rawOutput.Trim();
+
+        // Validación previa: si no tiene estructura JSON con campo 'resultado', es texto conversacional
+        if (!trimmed.StartsWith('{') || !trimmed.EndsWith('}') || !trimmed.Contains("resultado", StringComparison.OrdinalIgnoreCase))
         {
-            var evaluation = JsonSerializer.Deserialize<CreditEvaluationResult>(rawOutput, _jsonOptions);
-            if (!string.IsNullOrWhiteSpace(evaluation?.Resultado))
-            {
-                return evaluation.ToMarkdown();
-            }
-        }
-        catch
-        {
+            return rawOutput;
         }
 
-        return rawOutput;
+        try
+        {
+            var evaluation = JsonSerializer.Deserialize<CreditEvaluationResult>(trimmed, _jsonOptions);
+            return !string.IsNullOrWhiteSpace(evaluation?.Resultado)
+                ? evaluation.ToMarkdown()
+                : rawOutput;
+        }
+        catch (JsonException)
+        {
+            // Si el JSON viene malformado o trunco, se retorna el texto crudo sin romper el flujo
+            return rawOutput;
+        }
     }
 
     private static string GenerateMockResponse(string agentName) =>
