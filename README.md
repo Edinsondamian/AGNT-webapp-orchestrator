@@ -26,7 +26,7 @@ Proyecto **ligero, desacoplado y sin sobre-ingeniería** para la orquestación c
 
 ```text
 AGNT-webapp-orchestrator-simplificado/
-├── Program.cs             # Minimal API: Endpoints /api/messages y /api/chat + Callback al conector M365
+├── Program.cs             # Minimal API: Endpoint /api/messages + Callback al conector M365 Playground
 ├── CreditOrchestrator.cs  # Orquestador: despacho directo y preservación de sesión con Azure AI Foundry
 ├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads nativos y formateo JSON)
 ├── Models.cs              # Contratos Bot Framework Activity y modelos de transporte REST
@@ -54,7 +54,6 @@ flowchart TD
 - **Evento de Bienvenida (`conversationUpdate`)**: Apenas el usuario ingresa al chat, recibe un saludo explicativo sobre el proceso 100% digital.
 - **`POST /api/messages`**: Recibe las actividades del Bot Framework desde el playground.
 - **`TrySendToConnectorAsync`**: Despacha la respuesta mediante HTTP POST directamente al conector local del Playground (`{serviceUrl}/v3/conversations/{convId}/activities`), permitiendo que la interfaz de Teams dibuje la burbuja de chat en tiempo real.
-- **`POST /api/chat`**: Endpoint REST alternativo para pruebas directas desde Swagger (`http://localhost:5000`) o Postman.
 
 ### 2. `CreditOrchestrator.cs` (100% Agéntico — Cero Regex)
 - **Desacoplamiento Total**: Elimina el uso de expresiones regulares frágiles o listas de palabras clave para "adivinar" la intención del usuario.

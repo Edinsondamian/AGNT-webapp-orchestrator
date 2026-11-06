@@ -1,50 +1,38 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
-using Azure.Core;
-using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
+using Azure.AI.Extensions.OpenAI;
 using Azure.Identity;
 using OpenAI;
-using OpenAI.Responses;
 
 #pragma warning disable OPENAI001
 
 namespace AGNT.WebappOrchestrator;
 
-public sealed class FoundryAgentClient
+public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAgentClient> logger)
 {
-    private readonly ILogger<FoundryAgentClient> _logger;
-    private readonly bool _useMock;
-    private readonly AIProjectClient? _client;
+    private readonly bool _useMock = config.GetValue<bool>("AzureAIFoundry:UseMock", false)
+                                     || string.IsNullOrWhiteSpace(config["AzureAIFoundry:Endpoint"]);
+
+    private readonly AIProjectClient? _client =
+        (!config.GetValue<bool>("AzureAIFoundry:UseMock", false) && !string.IsNullOrWhiteSpace(config["AzureAIFoundry:Endpoint"]))
+            ? new AIProjectClient(new Uri(config["AzureAIFoundry:Endpoint"]!), new AzureCliCredential())
+            : null;
+
     private readonly ConcurrentDictionary<string, string> _conversationThreads = new();
-
-    // Inicializamos el proyecto con credenciales locales o si tiene mock activado
-    public FoundryAgentClient(IConfiguration config, ILogger<FoundryAgentClient> logger)
-    {
-        _logger = logger;
-        var endpoint = config["AzureAIFoundry:Endpoint"];
-        _useMock = config.GetValue<bool>("AzureAIFoundry:UseMock", false) || string.IsNullOrWhiteSpace(endpoint);
-
-        if (!_useMock)
-        {
-            _client = new AIProjectClient(new Uri(endpoint!), new AzureCliCredential());
-        }
-    }
-
-    // Memoria de conversaciones, para que el agente pueda recordar mensajes previos y mantener el contexto de la conversación.
 
     public async Task<string> RunAgentAsync(string agentName, string message, string? conversationKey = null, CancellationToken ct = default)
     {
         if (_useMock || _client == null)
         {
-            _logger.LogInformation("[Foundry Mock] Simulando respuesta de agente '{Agent}' para mensaje: {Message}", agentName, message);
-            return GenerateMockResponse(agentName, message);
+            logger.LogInformation("[Foundry Mock] Simulando respuesta de agente '{Agent}' para mensaje: {Message}", agentName, message);
+            return GenerateMockResponse(agentName);
         }
 
         try
         {
-            _logger.LogInformation("[Foundry Cloud] Invocando agente '{Agent}' en Azure AI Foundry...", agentName);
+            logger.LogInformation("[Foundry Cloud] Invocando agente '{Agent}' en Azure AI Foundry...", agentName);
             var agentClient = _client.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName);
 
             string? azureConvId = null;
@@ -59,7 +47,7 @@ public sealed class FoundryAgentClient
                     var newConv = await Task.Run(() => conversationClient.CreateProjectConversation(), ct);
                     azureConvId = newConv.Value.Id;
                     _conversationThreads[conversationKey] = azureConvId;
-                    _logger.LogInformation("[Foundry Cloud] Nueva conversación creada en Azure: {ConvId}", azureConvId);
+                    logger.LogInformation("[Foundry Cloud] Nueva conversación creada en Azure: {ConvId}", azureConvId);
                 }
             }
 
@@ -70,16 +58,16 @@ public sealed class FoundryAgentClient
             var response = await Task.Run(() => responseClient.CreateResponse(message), ct);
             var rawOutput = response.Value.GetOutputText();
 
-            return FormatAgentOutput(agentName, rawOutput);
+            return FormatAgentOutput(rawOutput);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[Foundry Error] Falla al invocar agente '{Agent}'. Detalle: {Msg}", agentName, ex.Message);
+            logger.LogWarning(ex, "[Foundry Error] Falla al invocar agente '{Agent}'. Detalle: {Msg}", agentName, ex.Message);
             return $"[Azure AI Foundry Error]: No se pudo procesar con '{agentName}': {ex.Message}";
         }
     }
 
-    private static string FormatAgentOutput(string agentName, string? rawOutput)
+    private static string FormatAgentOutput(string? rawOutput)
     {
         if (string.IsNullOrWhiteSpace(rawOutput))
             return "No se obtuvo respuesta del agente.";
@@ -120,7 +108,7 @@ public sealed class FoundryAgentClient
         return rawOutput;
     }
 
-    private static string GenerateMockResponse(string agentName, string message)
+    private static string GenerateMockResponse(string agentName)
     {
         if (agentName.Contains("creditici", StringComparison.OrdinalIgnoreCase))
         {

@@ -1,9 +1,7 @@
 using AGNT.WebappOrchestrator;
-using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Servicios esenciales y simples
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
@@ -18,12 +16,13 @@ app.UseCors();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "AGNT Web App Orchestrator (Simplificado) v1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "AGNT Web App Orchestrator v1");
     c.RoutePrefix = string.Empty;
 });
 
+// Endpoint único para Microsoft 365 Agents Playground
 app.MapPost("/api/messages", async (
-    [FromBody] BotActivity activity,
+    BotActivity activity,
     CreditOrchestrator orchestrator,
     IHttpClientFactory httpClientFactory,
     ILogger<Program> logger,
@@ -57,7 +56,7 @@ app.MapPost("/api/messages", async (
 
     // 2. Procesar mensaje del usuario
     var userText = activity.Text?.Trim() ?? string.Empty;
-    var result = await orchestrator.ProcessMessageAsync(userText, convId, ct);
+    var reply = await orchestrator.ProcessMessageAsync(userText, convId, ct);
 
     var responseActivity = new OutgoingActivity(
         Type: "message",
@@ -68,28 +67,13 @@ app.MapPost("/api/messages", async (
         From: botAccount,
         Recipient: userAccount,
         Conversation: activity.Conversation,
-        Text: result.Response);
+        Text: reply);
 
     // 3. Notificar al conector del playground para que pinte la burbuja en la ventana de chat
     await TrySendToConnectorAsync(httpClientFactory.CreateClient(), activity.ServiceUrl, convId, responseActivity, logger, ct);
 
     return Results.Ok(responseActivity);
-})
-.WithName("M365PlaygroundMessages")
-.WithTags("Microsoft 365 Agents Playground")
-.WithSummary("Endpoint para conectar con @microsoft/m365agentsplayground");
-
-app.MapPost("/api/chat", async (
-    [FromBody] ChatRequest request,
-    CreditOrchestrator orchestrator,
-    CancellationToken ct) =>
-{
-    var result = await orchestrator.ProcessMessageAsync(request.Message ?? string.Empty, request.ConversationId, ct);
-    return Results.Ok(result);
-})
-.WithName("ChatApi")
-.WithTags("Orchestrator")
-.WithSummary("Endpoint REST para enviar consultas al orquestador");
+});
 
 static async Task TrySendToConnectorAsync(
     HttpClient client,
