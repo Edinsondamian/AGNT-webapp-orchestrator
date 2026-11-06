@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace AGNT.WebappOrchestrator;
 
 public sealed record BotActivity(
@@ -32,3 +34,30 @@ public sealed record OutgoingActivity(
     BotAccount? Recipient,
     BotConversation? Conversation,
     string Text);
+
+public sealed record CreditEvaluationResult(
+    string? IdValidacion,
+    string? Resultado,
+    int? ScoreCrediticio,
+    string? NivelRiesgo,
+    decimal? MontoAprobado,
+    decimal? CuotaEstimada,
+    List<string>? Observaciones)
+{
+    public string ToMarkdown()
+    {
+        var icon = string.Equals(Resultado, "APROBADO", StringComparison.OrdinalIgnoreCase) ? "✅" : "⚠️";
+        var obs = Observaciones is { Count: > 0 } ? $"\n• **Observación**: {Observaciones[0]}" : "";
+
+        return string.Format(
+            Constants.Templates.CreditEvaluation,
+            icon,
+            Resultado ?? "EVALUADO",
+            ScoreCrediticio?.ToString() ?? "-",
+            NivelRiesgo ?? "-",
+            MontoAprobado?.ToString("N2", CultureInfo.InvariantCulture) ?? "0.00",
+            CuotaEstimada?.ToString("N2", CultureInfo.InvariantCulture) ?? "0.00",
+            IdValidacion ?? "-",
+            obs);
+    }
+}

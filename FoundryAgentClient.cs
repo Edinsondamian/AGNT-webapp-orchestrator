@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Text.Json;
 using Azure.AI.Projects;
 using Azure.AI.Extensions.OpenAI;
@@ -32,9 +31,11 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
 
         try
         {
+            // Recupera el cliente del agente de Foundry y prepara la conversación
             logger.LogInformation("[Foundry Cloud] Invocando agente '{Agent}' en Azure AI Foundry...", agentName);
             var agentClient = _client.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName);
 
+            // Bloque de Gestión de memoria multiturno
             string? azureConvId = null;
             if (!string.IsNullOrEmpty(conversationKey))
             {
@@ -51,6 +52,7 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
                 }
             }
 
+            // Bloque de Invocación del agente y manejo de mensaje
             var responseClient = string.IsNullOrEmpty(azureConvId)
                 ? agentClient
                 : _client.ProjectOpenAIClient.GetProjectResponsesClientForAgentEndpoint(agentName, defaultConversationId: azureConvId);
@@ -67,6 +69,8 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
         }
     }
 
+    private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     private static string FormatAgentOutput(string? rawOutput)
     {
         if (string.IsNullOrWhiteSpace(rawOutput))
@@ -74,27 +78,10 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
 
         try
         {
-            using var doc = JsonDocument.Parse(rawOutput);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("resultado", out var resElem))
+            var evaluation = JsonSerializer.Deserialize<CreditEvaluationResult>(rawOutput, _jsonOptions);
+            if (!string.IsNullOrWhiteSpace(evaluation?.Resultado))
             {
-                var resultado = resElem.GetString() ?? "EVALUADO";
-                var icon = resultado.Equals("APROBADO", StringComparison.OrdinalIgnoreCase) ? "✅" : "⚠️";
-                var score = root.TryGetProperty("scoreCrediticio", out var s) ? s.ToString() : "-";
-                var riesgo = root.TryGetProperty("nivelRiesgo", out var r) ? r.GetString() : "-";
-                var monto = root.TryGetProperty("montoAprobado", out var m) ? m.GetDecimal().ToString("N2", CultureInfo.InvariantCulture) : "0.00";
-                var cuota = root.TryGetProperty("cuotaEstimada", out var c) ? c.GetDecimal().ToString("N2", CultureInfo.InvariantCulture) : "0.00";
-                var valId = root.TryGetProperty("idValidacion", out var v) ? v.GetString() : "-";
-
-                string observacion = "";
-                if (root.TryGetProperty("observaciones", out var obsArray) && obsArray.GetArrayLength() > 0)
-                {
-                    observacion = $"\n• **Observación**: {obsArray[0].GetString()}";
-                }
-
-                return string.Format(
-                    Constants.Templates.CreditEvaluation,
-                    icon, resultado, score, riesgo, monto, cuota, valId, observacion);
+                return evaluation.ToMarkdown();
             }
         }
         catch
