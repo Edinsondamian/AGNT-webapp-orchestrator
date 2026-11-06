@@ -61,3 +61,28 @@ public sealed record CreditEvaluationResult(
             obs);
     }
 }
+
+// --- Contratos de OpenAI Decisions API para Enrutamiento de Agentes ---
+public sealed record DecisionRequest(
+    string Model,
+    string Input,
+    List<DecisionQuestion> Questions);
+
+public sealed record DecisionQuestion(
+    string Type,
+    string Name,
+    string Instructions,
+    List<DecisionChoice> Choices);
+
+public sealed record DecisionChoice(
+    string Value,
+    string Description);
+
+public sealed record DecisionResponse(
+    List<DecisionAnswer>? Answers);
+
+public sealed record DecisionAnswer(
+    string? Type,
+    string? Name,
+    string? Choice,
+    double? Confidence);

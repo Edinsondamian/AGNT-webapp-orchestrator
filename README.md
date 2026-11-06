@@ -1,24 +1,79 @@
-# AGNT Web App Orchestrator (Versión Simplificada)
+# AGNT Web App Orchestrator — Rama `feature/V1.1`
 
-Proyecto **ligero, desacoplado y sin sobre-ingeniería** para la orquestación conversacional de evaluación crediticia con **Azure AI Foundry**, diseñado para integrarse visualmente con **Microsoft 365 Agents Playground** (`@microsoft/m365agentsplayground`) y Microsoft Teams.
+Proyecto para la orquestación conversacional de evaluación crediticia con **Azure AI Foundry**, dotado de un **Orquestador Inteligente basado en Prompt** siguiendo el estándar del **OpenAI Decisions API (`type: "choice"`)**, diseñado para integrarse con **Microsoft 365 Agents Playground** (`@microsoft/m365agentsplayground`) y Microsoft Teams.
 
 ---
 
-## 🎯 ¿Cómo funciona? (Resumen Ejecutivo)
+## 🎯 ¿Qué novedades incluye la versión V1.1?
 
-1. **100% Conversacional — CERO Documentos Físicos**:
-   - No se requieren boletas, recibos, fotos ni trámites en papel.
-   - La captura de datos y la evaluación se realizan de manera fluida y conversacional en el chat.
-2. **Datos Clave de la Evaluación**:
-   - **Documento de Identidad (DNI)**: 8 dígitos numéricos.
-   - **Monto Solicitado**: en Soles (PEN) o Dólares (USD).
-   - **Actividad Económica / Negocio**: Rubro o fuente de ingresos (ej. bodega, transporte, restaurante, etc.).
-3. **Arquitectura Agéntica Directa (Sin Regex ni Reglas Rígidas)**:
-   - Se eliminaron las expresiones regulares y los parsers de texto deterministas en C#.
-   - Los mensajes se canalizan directamente al agente cognitivo **`agente-evaluacion-crediticia`** en Azure AI Foundry, permitiendo que el modelo (`gpt-5.6-luna`) entienda lenguaje natural, intenciones mixtas, saludos, dudas de requisitos y evaluaciones crediticias de forma integral.
-   - El agente valida en tiempo real con una herramienta OpenAPI de listas negras (`GetDocumentStatus`) y genera el scoring con cuotas estimadas.
-4. **Memoria Multi-Turno Nativa Unificada**:
-   - El orquestador mantiene el hilo de conversación (`ProjectConversation`) con Azure AI Foundry, asegurando que el contexto y los datos entregados por turnos se preserven sin fragmentación.
+1. **Orquestador Cognitivo Basado en Prompt (Decisions API Pattern)**:
+   - En lugar de reglas estáticas de Regex o enrutamiento ciego, el orquestador cuenta con un **Prompt de Decisión** formal basado en la especificación de OpenAI Decisions API (`POST /v1/decisions`, modelo `gpt-6-luna`).
+   - El motor de decisión evalúa la consulta del usuario y selecciona la mejor opción (`choice`):
+     - **`documental`** ➔ Si el usuario realiza preguntas informativas sobre requisitos, qué papeles o documentos se solicitan, políticas o condiciones previas.
+     - **`credit`** ➔ Si el usuario solicita un crédito, proporciona su DNI, montos, cuotas o avanza en su evaluación financiera.
+2. **Derivación Dinámica a Dos Agentes Especializados en Azure AI Foundry**:
+   - `credit` ➔ Se deriva a **`agente-evaluacion-crediticia`** (scoring, cálculo de cuotas y validación en listas negras con tool OpenAPI).
+   - `documental` ➔ Se deriva a **`Agente-evaluacion-documental`** (asesoría sobre documentos, comprobantes y políticas de crédito).
+3. **Gestión de Memoria Aislada por Agente (`threadKey`)**:
+   - Se mantiene el hilo conversacional nativo (`ProjectConversation`) particionado por agente (`{agentName}:{conversationKey}`), garantizando que el usuario pueda alternar entre dudas de requisitos y solicitudes de crédito en una misma sesión sin que los hilos colisionen en Azure AI Foundry.
+
+---
+
+## 🧩 Arquitectura de Enrutamiento Inteligente
+
+```mermaid
+flowchart TD
+    A["👤 Usuario / M365 Agents Playground"] <-->|"POST /api/messages"| B["⚡ Program.cs<br/>(Minimal API + Callback TrySendToConnectorAsync)"]
+    B <--> C["🧠 CreditOrchestrator.cs<br/>(Motor de Orquestación)"]
+    C -->|"1. Evaluación de Intención<br/>Prompt Decisions API (gpt-6-luna)"| D{"⚖️ Decision Engine<br/>(Choice: documental vs credit)"}
+    D -->|"Choice: documental"| E["📄 Agente-evaluacion-documental<br/>(Requisitos y Políticas)"]
+    D -->|"Choice: credit"| F["💳 agente-evaluacion-crediticia<br/>(Evaluación y Scoring)"]
+    F <-->|"Tool OpenAPI: GetDocumentStatus"| G["🛡️ API Blacklist Externa"]
+```
+
+---
+
+## 📝 Especificación del Prompt de Decisión (OpenAI Decisions API)
+
+El orquestador implementa el contrato de decisión:
+
+```json
+{
+  "model": "gpt-6-luna",
+  "input": "<mensaje del usuario>",
+  "questions": [
+    {
+      "type": "choice",
+      "name": "target_agent",
+      "instructions": "Determina a qué agente especializado de Azure AI Foundry se debe derivar la consulta del usuario:",
+      "choices": [
+        {
+          "value": "credit",
+          "description": "Solicitudes de crédito, montos, cuotas, evaluación crediticia, DNI, capacidad de pago o temas financieros."
+        },
+        {
+          "value": "documental",
+          "description": "Consultas puramente informativas sobre requisitos documentales, qué papeles o documentos se solicitan, políticas de documentación o condiciones generales."
+        }
+      ]
+    }
+  ]
+}
+```
+
+* **Respuesta Esperada del Decision Engine**:
+  ```json
+  {
+    "answers": [
+      {
+        "type": "choice",
+        "name": "target_agent",
+        "choice": "credit",
+        "confidence": 0.96
+      }
+    ]
+  }
+  ```
 
 ---
 
@@ -27,67 +82,14 @@ Proyecto **ligero, desacoplado y sin sobre-ingeniería** para la orquestación c
 ```text
 AGNT-webapp-orchestrator-simplificado/
 ├── Program.cs             # Minimal API: Endpoint /api/messages + Callback al conector M365 Playground
-├── CreditOrchestrator.cs  # Orquestador: despacho directo y preservación de sesión con Azure AI Foundry
-├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads nativos y formateo JSON)
+├── CreditOrchestrator.cs  # Orquestador con Prompt de Decisión (OpenAI Decisions API) y enrutador a Foundry
+├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads multi-agente y formateo JSON)
 ├── Constants.cs           # Textos constantes, plantillas de salida y respuestas mock
-├── Models.cs              # Contratos Bot Framework Activity y DTO CreditEvaluationResult
-├── appsettings.json       # Configuración del endpoint de Foundry y nombres de agentes
+├── Models.cs              # Contratos Bot Framework Activity, DTO CreditEvaluationResult y modelos Decisions API
+├── appsettings.json       # Configuración de endpoints, agentes y parámetros de Decisions API
 ├── appsettings.Development.json # Configuración local de contingencia (UseMock: true)
 └── README.md              # Documentación técnica y guía de ejecución
 ```
-
----
-
-## 🧩 Componentes del Sistema
-
-```mermaid
-flowchart TD
-    A["👤 Usuario / M365 Agents Playground"] <-->|"Bot Framework Activity Protocol<br/>POST /api/messages"| B["⚡ Program.cs<br/>(Minimal API + Callback TrySendToConnectorAsync)"]
-    B <--> C["🧠 CreditOrchestrator.cs<br/>(Despacho Directo + Preservación de Sesión)"]
-    C <--> D["☁️ FoundryAgentClient.cs<br/>(Azure.AI.Projects SDK + AzureCliCredential)"]
-    D <-->|"API Responses & ProjectConversation"| E["🤖 Azure AI Foundry<br/>(proy-agentes-poc)"]
-    E -->|"Evaluación, Scoring y Diálogo"| F["💳 agente-evaluacion-crediticia"]
-    F <-->|"Tool OpenAPI: GetDocumentStatus"| G["🛡️ API Blacklist Externa<br/>(Validación de Clientes Habilitados)"]
-```
-
-### 1. `Program.cs`
-- **Minimal API en .NET 8**: Sin sobrecarga de controladores pesados ni capas innecesarias.
-- **Evento de Bienvenida (`conversationUpdate`)**: Apenas el usuario ingresa al chat, recibe un saludo explicativo sobre el proceso 100% digital.
-- **`POST /api/messages`**: Recibe las actividades del Bot Framework desde el playground.
-- **`TrySendToConnectorAsync`**: Despacha la respuesta mediante HTTP POST directamente al conector local del Playground (`{serviceUrl}/v3/conversations/{convId}/activities`), permitiendo que la interfaz de Teams dibuje la burbuja de chat en tiempo real.
-
-### 2. `CreditOrchestrator.cs` (100% Agéntico — Cero Regex)
-- **Desacoplamiento Total**: Elimina el uso de expresiones regulares frágiles o listas de palabras clave para "adivinar" la intención del usuario.
-- **Canalización Directa**: Valida entradas vacías y canaliza la conversación directamente al agente en Azure AI Foundry, preservando el identificador del hilo conversacional.
-- **Ventajas de este diseño**:
-  - **Cero Falsos Positivos**: Números de teléfono, montos o códigos postales ya no se confunden con DNIs mediante regex.
-  - **Tolerancia a Faltas Ortográficas y Jergas**: El LLM entiende cualquier variación lingüística de forma natural.
-  - **Memoria Unificada**: Todo el diálogo se mantiene en el mismo hilo (`ProjectConversation`), evitando que saltos entre agentes borren el contexto del usuario.
-
-### 3. `FoundryAgentClient.cs` y el rol de `AIProjectClient`
-Es el cliente oficial de integración con **Azure AI Foundry** (`Azure.AI.Projects`). Actúa como la puerta de acceso central hacia los recursos de IA del proyecto en la nube:
-
-```mermaid
-flowchart TD
-    A["🔐 AzureCliCredential<br/>(az login)"] --> B["⚡ AIProjectClient<br/>(Punto de Entrada al Proyecto en Foundry)"]
-    B --> C["🤖 ProjectOpenAIClient<br/>Invoca al 'agente-evaluacion-crediticia'"]
-    B --> D["🧵 ProjectConversationsClient<br/>Crea y mantiene hilos multi-turno"]
-    B --> E["🛠️ Ejecución Transparente de Tools<br/>API OpenAPI de Blacklist / Habilitación"]
-```
-
-**¿Qué hace `AIProjectClient` en el proyecto?**
-- **Autenticación sin secretos expuestos**: Negocia tokens con Microsoft Entra ID mediante `AzureCliCredential` sin requerir API keys estáticas en el código.
-- **Invocación de Agentes**: Obtiene clientes especializados (`ProjectOpenAIClient`) para despachar mensajes a `agente-evaluacion-crediticia`.
-- **Persistencia de Conversaciones (`ProjectConversation`)**: Crea y gestiona los hilos de diálogo en Azure, permitiendo que el LLM recuerde los turnos anteriores sin requerir una base de datos local.
-- **Orquestación de Herramientas**: Permite que las herramientas OpenAPI conectadas al agente (como la validación de listas negras) se ejecuten en la nube de forma transparente.
-- **Formateo Visual de Salida (`FormatAgentOutput`)**: Cuenta con validación previa de estructura JSON y deserialización tipada (`CreditEvaluationResult`) para transformar la respuesta de Azure en una tarjeta amigable para Teams utilizando las plantillas de `Constants.cs`.
-- **Modo Contingencia (`UseMock`)**: Simula evaluaciones realistas en desarrollo local sin consumir saldo de Azure.
-
-### 4. `Constants.cs`
-- Centraliza los textos de bienvenida, mensajes de orientación, respuestas mock y la plantilla de tarjeta Markdown de crédito, evitando cadenas de texto quemadas dentro de la lógica.
-
-### 5. `Models.cs`
-- Define los registros estrictamente necesarios para el Bot Framework Activity Protocol de Microsoft Teams / Playground (`BotActivity`, `BotAccount`, `BotConversation`, `OutgoingActivity`) y el DTO fuertemente tipado `CreditEvaluationResult` con su método `ToMarkdown()`.
 
 ---
 
@@ -111,6 +113,12 @@ flowchart TD
       "Credit": "agente-evaluacion-crediticia",
       "General": "Agente-evaluacion-documental"
     }
+  },
+
+  "Decisions": {
+    "Endpoint": "https://api.openai.com/v1/decisions",
+    "Model": "gpt-6-luna",
+    "ApiKey": ""
   }
 }
 ```
@@ -122,12 +130,11 @@ flowchart TD
 ### Prerrequisitos
 - **.NET 8 SDK** instalado.
 - **Node.js** (v18+) con `npx`.
-- **Azure CLI** instalado.
+- **Azure CLI** autenticado (`az login`).
 
 ---
 
 ### Paso 1: Autenticación en Azure CLI
-Inicia sesión con la cuenta autorizada en el proyecto de Azure AI Foundry:
 ```powershell
 az login
 ```
@@ -135,11 +142,11 @@ az login
 ---
 
 ### Paso 2: Iniciar el Orquestador Web (.NET 8)
-En una terminal situada en la raíz del proyecto:
+En una terminal en la raíz del proyecto:
 ```powershell
 dotnet run
 ```
-*El servicio iniciará en `http://localhost:5000` y desplegará Swagger UI en la raíz.*
+*El servicio iniciará en `http://localhost:5000` con Swagger disponible en la raíz.*
 
 ---
 
@@ -152,68 +159,31 @@ Se abrirá automáticamente el navegador con la interfaz de chat emulando Micros
 
 ---
 
-## 🧪 Casos de Prueba y Respuestas Esperadas
+## 🧪 Pruebas de Enrutamiento Dinámico V1.1
 
-A continuación se detallan los escenarios validados en vivo contra Azure AI Foundry:
-
-### Caso 1: Bienvenida al Entrar al Chat
-* **Evento**: El usuario abre la conversación en el Playground.
-* **Respuesta del Bot**:
-  > ¡Hola! 👋 Bienvenido al Asistente de Evaluación Crediticia en Microsoft 365 Agents Playground.  
-  > Para evaluar tu crédito 100% digital (sin requerir documentos físicos ni papeleos), por favor indícame tu **número de DNI**, el **monto** que deseas solicitar y tu **actividad económica**.
+### Caso 1: Consulta Informativa de Requisitos (Se deriva a Agente Documental)
+* **Entrada**: `Hola, que requisitos y documentos piden para un credito?`
+* **Decisión del Orquestador**: `Choice='documental'`
+* **Agente Ejecutado**: `Agente-evaluacion-documental`
+* **Respuesta**: Explica en detalle los requisitos de identidad, boletas de pago, estados de cuenta y comprobantes según el tipo de crédito.
 
 ---
 
-### Caso 2: Saludo Conversacional y Chitchat
-* **Entrada**: `Hola, buenas tardes`
-* **Agente**: `agente-evaluacion-crediticia`
-* **Respuesta Esperada**:
-  > *¡Hola! Buenas tardes 😊 ¿Cómo estás? ¿En qué puedo ayudarte hoy?*
+### Caso 2: Solicitud de Evaluación Crediticia (Se deriva a Agente de Crédito)
+* **Entrada**: `Hola, mi DNI es 12345678, solicito 10000 soles y tengo una bodega de abarrotes.`
+* **Decisión del Orquestador**: `Choice='credit'`
+* **Agente Ejecutado**: `agente-evaluacion-crediticia`
+* **Respuesta**: Emite el veredicto aprobado, score 600, cuota mensual estimada y código de validación.
 
 ---
 
-### Caso 3: Evaluación Completa — Cliente Habilitado (Aprobado)
-* **Entrada**: `Hola, mi DNI es 12345678, requiero 10000 soles y tengo una bodega de abarrotes.`
-* **Agente**: `agente-evaluacion-crediticia`
-* **Comportamiento**: Invoca la herramienta OpenAPI de validación (DNI `12345678` retorna `isEnabled: true`), calcula el scoring de riesgo medio y dictamina.
-* **Respuesta Esperada**:
-  > ✅ **Evaluación Crediticia — Azure AI Foundry**  
-  > • **Resultado**: APROBADO  
-  > • **Score crediticio**: 600 (Riesgo: MEDIO)  
-  > • **Monto aprobado**: S/ 10,000.00 PEN  
-  > • **Cuota estimada**: S/ 931.14 / mes  
-  > • **Validación**: VAL-20261105-000011  
-  > • **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.
+### Caso 3: Conversación Mixta en la Misma Sesión
+El usuario puede preguntar primero por documentos y luego solicitar el crédito:
+1. `¿Qué documentos piden?` ➔ El orquestador deriva a `Agente-evaluacion-documental`.
+2. `Perfecto, evalúame con DNI 12345678 y 1000 soles` ➔ El orquestador detecta la intención crediticia y deriva a `agente-evaluacion-crediticia`, manteniendo ambos hilos activos.
 
 ---
 
-### Caso 4: Cliente en Lista Negra / No Habilitado
-* **Entrada**: `Buenas noches, solicito un crédito de 15000 soles, mi DNI es 87654321 y trabajo en transporte de carga.`
-* **Agente**: `agente-evaluacion-crediticia`
-* **Comportamiento**: La herramienta OpenAPI detecta que el DNI `87654321` se encuentra inhabilitado (`isEnabled: false`).
-* **Respuesta Esperada**:
-  > *El cliente no está habilitado.*
-
----
-
-### Caso 5: Conversación Multi-Turno (Memoria Contextual)
-Demuestra que el orquestador y Azure AI Foundry conservan el contexto de la sesión sin pérdida de datos:
-
-* **Turno 1 (Usuario)**: `hola, mi dni es 12345678`
-* **Respuesta Turno 1 (Bot)**:
-  > *El cliente está habilitado. Para continuar con la evaluación crediticia, indica el monto solicitado y la actividad del negocio.*
-* **Turno 2 (Usuario)**: `quiero un monto de mil soles y soy comerciante`
-* **Respuesta Turno 2 (Bot)**:
-  > ✅ **Evaluación Crediticia — Azure AI Foundry**  
-  > • **Resultado**: APROBADO  
-  > • **Score crediticio**: 600 (Riesgo: MEDIO)  
-  > • **Monto aprobado**: S/ 1,000.00 PEN  
-  > • **Cuota estimada**: S/ 93.11 / mes  
-  > • **Validación**: VAL-20261105-000012  
-  > • **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.
-
----
-
-## 📦 Repositorio y Versionamiento
-- **Repositorio Oficial**: [GitHub - Edinsondamian/AGNT-webapp-orchestrator](https://github.com/Edinsondamian/AGNT-webapp-orchestrator)
-- **Rama principal**: `main`
+## 📦 Versionamiento
+- **Repositorio**: [GitHub - Edinsondamian/AGNT-webapp-orchestrator](https://github.com/Edinsondamian/AGNT-webapp-orchestrator)
+- **Rama Actual**: `feature/V1.1`

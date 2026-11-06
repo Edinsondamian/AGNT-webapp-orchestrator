@@ -39,7 +39,8 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
             string? azureConvId = null;
             if (!string.IsNullOrEmpty(conversationKey))
             {
-                if (!_conversationThreads.TryGetValue(conversationKey, out azureConvId))
+                var threadKey = $"{agentName}:{conversationKey}";
+                if (!_conversationThreads.TryGetValue(threadKey, out azureConvId))
                 {
                     var conversationClient = new ProjectConversationsClient(
                         agentClient.Pipeline,
@@ -47,8 +48,8 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
 
                     var newConv = await Task.Run(() => conversationClient.CreateProjectConversation(), ct);
                     azureConvId = newConv.Value.Id;
-                    _conversationThreads[conversationKey] = azureConvId;
-                    logger.LogInformation("[Foundry Cloud] Nueva conversación creada en Azure: {ConvId}", azureConvId);
+                    _conversationThreads[threadKey] = azureConvId;
+                    logger.LogInformation("[Foundry Cloud] Nueva conversación creada en Azure ({Agent}): {ConvId}", agentName, azureConvId);
                 }
             }
 
