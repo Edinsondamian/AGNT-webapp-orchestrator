@@ -29,6 +29,7 @@ AGNT-webapp-orchestrator-simplificado/
 ├── Program.cs             # Minimal API: Endpoint /api/messages + Callback al conector M365 Playground
 ├── CreditOrchestrator.cs  # Orquestador: despacho directo y preservación de sesión con Azure AI Foundry
 ├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads nativos y formateo JSON)
+├── Constants.cs           # Textos constantes, plantillas de salida y respuestas mock
 ├── Models.cs              # Contratos Bot Framework Activity y modelos de transporte REST
 ├── appsettings.json       # Configuración del endpoint de Foundry y nombres de agentes
 ├── appsettings.Development.json # Configuración local de contingencia (UseMock: true)

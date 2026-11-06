@@ -13,7 +13,7 @@ public sealed class CreditOrchestrator(
         var cleanMessage = message?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(cleanMessage))
         {
-            return "Por favor, escribe tu consulta o indícame tu número de DNI para comenzar.";
+            return Constants.Messages.EmptyMessagePrompt;
         }
 
         var targetAgent = config["AzureAIFoundry:Agents:Credit"] ?? "agente-evaluacion-crediticia";

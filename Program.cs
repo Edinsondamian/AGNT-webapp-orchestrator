@@ -35,10 +35,6 @@ app.MapPost("/api/messages", async (
     // 1. Manejo de bienvenida
     if (string.Equals(activity.Type, "conversationUpdate", StringComparison.OrdinalIgnoreCase))
     {
-        var welcome = "¡Hola! 👋 Bienvenido al Asistente de Evaluación Crediticia en Microsoft 365 Agents Playground.\n\n" +
-                      "Para evaluar tu crédito 100% digital (sin requerir documentos físicos ni papeleos), " +
-                      "por favor indícame tu **número de DNI**, el **monto** que deseas solicitar y tu **actividad económica**.";
-
         var welcomeActivity = new OutgoingActivity(
             Type: "message",
             Id: Guid.NewGuid().ToString(),
@@ -48,7 +44,7 @@ app.MapPost("/api/messages", async (
             From: botAccount,
             Recipient: userAccount,
             Conversation: activity.Conversation,
-            Text: welcome);
+            Text: Constants.Messages.Welcome);
 
         await TrySendToConnectorAsync(httpClientFactory.CreateClient(), activity.ServiceUrl, convId, welcomeActivity, logger, ct);
         return Results.Ok(welcomeActivity);

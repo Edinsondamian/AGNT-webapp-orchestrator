@@ -70,7 +70,7 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
     private static string FormatAgentOutput(string? rawOutput)
     {
         if (string.IsNullOrWhiteSpace(rawOutput))
-            return "No se obtuvo respuesta del agente.";
+            return Constants.Messages.NoAgentResponse;
 
         try
         {
@@ -92,13 +92,9 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
                     observacion = $"\n• **Observación**: {obsArray[0].GetString()}";
                 }
 
-                return $"{icon} **Evaluación Crediticia — Azure AI Foundry**\n\n" +
-                       $"• **Resultado**: {resultado}\n" +
-                       $"• **Score crediticio**: {score} (Riesgo: {riesgo})\n" +
-                       $"• **Monto aprobado**: S/ {monto} PEN\n" +
-                       $"• **Cuota estimada**: S/ {cuota} / mes\n" +
-                       $"• **Validación**: {valId}{observacion}\n" +
-                       $"• **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.";
+                return string.Format(
+                    Constants.Templates.CreditEvaluation,
+                    icon, resultado, score, riesgo, monto, cuota, valId, observacion);
             }
         }
         catch
@@ -108,19 +104,8 @@ public sealed class FoundryAgentClient(IConfiguration config, ILogger<FoundryAge
         return rawOutput;
     }
 
-    private static string GenerateMockResponse(string agentName)
-    {
-        if (agentName.Contains("creditici", StringComparison.OrdinalIgnoreCase))
-        {
-            return "✅ **Evaluación Crediticia Aprobada (Azure AI Foundry)**\n\n" +
-                   "• **Estado**: APROBADO\n" +
-                   "• **Score crediticio**: 745 (Nivel de riesgo: BAJO)\n" +
-                   "• **Monto aprobado**: S/ 10,000.00\n" +
-                   "• **Cuota mensual estimada**: S/ 945.50 a 12 meses\n" +
-                   "• **Observaciones**: Actividad económica favorable. Proceso 100% digital sin requerir documentos físicos ni papeleos.\n" +
-                   "• **Canal**: Microsoft 365 Agents Playground";
-        }
-
-        return "[Agente de Consultas Generales]: ¡Hola! Te oriento con gusto: para solicitar tu crédito solo necesitas tu DNI, el monto requerido y tu actividad económica. No requerimos documentos físicos ni papeleos. ¿En qué más puedo ayudarte?";
-    }
+    private static string GenerateMockResponse(string agentName) =>
+        agentName.Contains("creditici", StringComparison.OrdinalIgnoreCase)
+            ? Constants.Mocks.CreditApproval
+            : Constants.Mocks.GeneralInquiry;
 }
