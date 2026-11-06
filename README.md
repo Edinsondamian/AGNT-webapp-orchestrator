@@ -184,6 +184,7 @@ El usuario puede preguntar primero por documentos y luego solicitar el crédito:
 
 ---
 
-## 📦 Versionamiento
-- **Repositorio**: [GitHub - Edinsondamian/AGNT-webapp-orchestrator](https://github.com/Edinsondamian/AGNT-webapp-orchestrator)
-- **Rama Actual**: `feature/V1.1`
+## 📦 Ramas y Versionamiento
+- **Repositorio Oficial**: [GitHub - Edinsondamian/AGNT-webapp-orchestrator](https://github.com/Edinsondamian/AGNT-webapp-orchestrator)
+- **`feature/V1`**: Versión simplificada con canalización directa al agente de crédito sin lógica determinista de texto en C#.
+- **`feature/V1.1` (Rama Actual)**: Versión con **Orquestador Cognitivo basado en Prompt (OpenAI Decisions API - `type: "choice"`)**, que evalúa la intención del usuario y deriva dinámicamente entre `Agente-evaluacion-documental` y `agente-evaluacion-crediticia`.
