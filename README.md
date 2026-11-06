@@ -30,7 +30,7 @@ AGNT-webapp-orchestrator-simplificado/
 ├── CreditOrchestrator.cs  # Orquestador: despacho directo y preservación de sesión con Azure AI Foundry
 ├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads nativos y formateo JSON)
 ├── Constants.cs           # Textos constantes, plantillas de salida y respuestas mock
-├── Models.cs              # Contratos Bot Framework Activity y modelos de transporte REST
+├── Models.cs              # Contratos Bot Framework Activity y DTO CreditEvaluationResult
 ├── appsettings.json       # Configuración del endpoint de Foundry y nombres de agentes
 ├── appsettings.Development.json # Configuración local de contingencia (UseMock: true)
 └── README.md              # Documentación técnica y guía de ejecución
@@ -80,14 +80,14 @@ flowchart TD
 - **Invocación de Agentes**: Obtiene clientes especializados (`ProjectOpenAIClient`) para despachar mensajes a `agente-evaluacion-crediticia`.
 - **Persistencia de Conversaciones (`ProjectConversation`)**: Crea y gestiona los hilos de diálogo en Azure, permitiendo que el LLM recuerde los turnos anteriores sin requerir una base de datos local.
 - **Orquestación de Herramientas**: Permite que las herramientas OpenAPI conectadas al agente (como la validación de listas negras) se ejecuten en la nube de forma transparente.
-- **Formateo Visual de Salida (`FormatAgentOutput`)**: Transforma la respuesta JSON del agente en una tarjeta amigable para Teams utilizando las plantillas centralizadas de `Constants.cs`.
+- **Formateo Visual de Salida (`FormatAgentOutput`)**: Cuenta con validación previa de estructura JSON y deserialización tipada (`CreditEvaluationResult`) para transformar la respuesta de Azure en una tarjeta amigable para Teams utilizando las plantillas de `Constants.cs`.
 - **Modo Contingencia (`UseMock`)**: Simula evaluaciones realistas en desarrollo local sin consumir saldo de Azure.
 
 ### 4. `Constants.cs`
 - Centraliza los textos de bienvenida, mensajes de orientación, respuestas mock y la plantilla de tarjeta Markdown de crédito, evitando cadenas de texto quemadas dentro de la lógica.
 
 ### 5. `Models.cs`
-- Define los registros estrictamente necesarios para el Bot Framework Activity Protocol de Microsoft Teams / Playground: `BotActivity`, `BotAccount`, `BotConversation` y `OutgoingActivity`.
+- Define los registros estrictamente necesarios para el Bot Framework Activity Protocol de Microsoft Teams / Playground (`BotActivity`, `BotAccount`, `BotConversation`, `OutgoingActivity`) y el DTO fuertemente tipado `CreditEvaluationResult` con su método `ToMarkdown()`.
 
 ---
 
