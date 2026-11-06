@@ -1,163 +1,208 @@
 # AGNT Web App Orchestrator (Versión Simplificada)
 
-Proyecto **super sencillo, funcional y sin sobre-ingeniería** para la orquestación conversacional de evaluación crediticia con **Azure AI Foundry**, diseñado para probarse visualmente en el playground oficial de Microsoft **`@microsoft/m365agentsplayground`**.
+Proyecto **ligero, desacoplado y sin sobre-ingeniería** para la orquestación conversacional de evaluación crediticia con **Azure AI Foundry**, diseñado para integrarse visualmente con **Microsoft 365 Agents Playground** (`@microsoft/m365agentsplayground`) y Microsoft Teams.
 
 ---
 
 ## 🎯 ¿Cómo funciona? (Resumen Ejecutivo)
 
-1. **100% Conversacional — CERO Documentos**:
-   - No se solicitan PDFs, fotos, boletas ni trámites físicos.
-   - Toda la captura de datos se realiza a través del chat de Microsoft 365.
-2. **Datos esenciales**:
-   - **Número de DNI**: 8 dígitos numéricos.
-   - **Monto**: en Soles (PEN).
-   - **Actividad económica (OBLIGATORIA)**: Si el usuario omite su actividad o negocio, el bot la solicita de forma proactiva antes de evaluar.
-   - **Plazo**: en meses (12 meses por defecto).
-3. **Enrutamiento a Azure AI Foundry**:
-   - Saludos o preguntas generales ➔ `Agente-consultas-generales`.
-   - Solicitudes con datos completos ➔ `agente-evaluacion-crediticia` en Azure AI Foundry para scoring y dictamen.
+1. **100% Conversacional — CERO Documentos Físicos**:
+   - No se requieren boletas, recibos, fotos ni trámites en papel.
+   - La captura de datos y la evaluación se realizan de manera fluida y conversacional en el chat.
+2. **Datos Clave de la Evaluación**:
+   - **Documento de Identidad (DNI)**: 8 dígitos numéricos.
+   - **Monto Solicitado**: en Soles (PEN) o Dólares (USD).
+   - **Actividad Económica / Negocio**: Rubro o fuente de ingresos (ej. bodega, transporte, restaurante, etc.).
+3. **Enrutamiento Inteligente a Azure AI Foundry**:
+   - **Consultas informativas y requisitos (sin DNI)** ➔ Enrutadas a `Agente-evaluacion-documental`.
+   - **Evaluación crediticia y flujo conversacional** ➔ Enrutadas a `agente-evaluacion-crediticia` en Azure AI Foundry, el cual valida en tiempo real con una herramienta OpenAPI de listas negras (`GetDocumentStatus`) y genera el scoring con cuotas estimadas.
+4. **Memoria Multi-Turno Nativa**:
+   - El orquestador mantiene el hilo de conversación (`ProjectConversation`) con Azure AI Foundry, permitiendo que el usuario entregue los datos en uno o varios turnos sin perder el contexto.
 
 ---
 
-## 📁 Estructura del Código (1 Solo Proyecto)
+## 📁 Estructura del Código
 
 ```text
 AGNT-webapp-orchestrator-simplificado/
-├── Program.cs             # Minimal API: Endpoints /api/messages y /api/chat + Callback a M365 Playground
-├── CreditOrchestrator.cs  # Orquestador: extracción de datos, regla de actividad económica y enrutamiento
-├── FoundryAgentClient.cs  # Cliente directo hacia Azure AI Foundry (con modo simulación Mock)
-├── Models.cs              # Contratos Bot Framework Activity y modelos de negocio
-├── appsettings.json       # Configuración de Azure AI Foundry y agentes
-├── appsettings.Development.json # Configuración local (UseMock: true)
-└── README.md              # Documentación y guía paso a paso
+├── Program.cs             # Minimal API: Endpoints /api/messages y /api/chat + Callback al conector M365
+├── CreditOrchestrator.cs  # Orquestador: análisis de intención, detección de DNI y enrutamiento inteligente
+├── FoundryAgentClient.cs  # Cliente Azure AI Foundry (SDK Azure.AI.Projects, threads nativos y formateo JSON)
+├── Models.cs              # Contratos Bot Framework Activity y modelos de transporte REST
+├── appsettings.json       # Configuración del endpoint de Foundry y nombres de agentes
+├── appsettings.Development.json # Configuración local de contingencia (UseMock: true)
+└── README.md              # Documentación técnica y guía de ejecución
 ```
 
 ---
 
-## 🛠️ Paso a Paso de la Creación del Código
-
-Esta sección detalla cómo fue construido el proyecto desde una hoja en blanco hasta su integración final con Microsoft 365 Agents Playground.
+## 🧩 Componentes del Sistema
 
 ```mermaid
 flowchart TD
-    A["Paso 1: Configurar Proyecto en .NET 8<br/>(Minimal API sin capas pesadas)"] --> B["Paso 2: Modelar Contratos (Models.cs)<br/>(Bot Framework Activity + CreditInfo)"]
-    B --> C["Paso 3: Cliente Azure AI Foundry (FoundryAgentClient.cs)<br/>(SDK Azure.AI.Projects + Modo Mock)"]
-    C --> D["Paso 4: Orquestador Conversacional (CreditOrchestrator.cs)<br/>(Extracción + Regla Actividad Económica)"]
-    D --> E["Paso 5: Endpoints y Conector M365 (Program.cs)<br/>(/api/messages con callback al serviceUrl)"]
-    E --> F["Paso 6: Configuración (appsettings.json)<br/>(Parámetros y simulación local)"]
-    F --> G["Paso 7: Prueba Visual con @microsoft/m365agentsplayground"]
+    A["👤 Usuario / M365 Agents Playground"] <-->|"Bot Framework Activity Protocol<br/>POST /api/messages"| B["⚡ Program.cs<br/>(Minimal API + Callback TrySendToConnectorAsync)"]
+    B <--> C["🧠 CreditOrchestrator.cs<br/>(Enrutamiento por Intención + Preservación de Sesión)"]
+    C <--> D["☁️ FoundryAgentClient.cs<br/>(Azure.AI.Projects SDK + AzureCliCredential)"]
+    D <-->|"API Responses & ProjectConversation"| E["🤖 Azure AI Foundry<br/>(proy-agentes-poc)"]
+    E -->|"Dudas / Requisitos"| F["📄 Agente-evaluacion-documental"]
+    E -->|"Evaluación y Scoring"| G["💳 agente-evaluacion-crediticia"]
+    G <-->|"Tool OpenAPI: GetDocumentStatus"| H["🛡️ API Blacklist Externa<br/>(Validación de Clientes Habilitados)"]
 ```
 
----
+### 1. `Program.cs`
+- **Minimal API en .NET 8**: Sin sobrecarga de controladores pesados ni capas innecesarias.
+- **Evento de Bienvenida (`conversationUpdate`)**: Apenas el usuario ingresa al chat, recibe un saludo explicativo sobre el proceso 100% digital.
+- **`POST /api/messages`**: Recibe las actividades del Bot Framework desde el playground.
+- **`TrySendToConnectorAsync`**: Despacha la respuesta mediante HTTP POST directamente al conector local del Playground (`{serviceUrl}/v3/conversations/{convId}/activities`), permitiendo que la interfaz de Teams dibuje la burbuja de chat en tiempo real.
+- **`POST /api/chat`**: Endpoint REST alternativo para pruebas directas desde Swagger (`http://localhost:5000`) o Postman.
 
-### Paso 1: Configurar el Proyecto Minimal API (.NET 8)
-Se creó un proyecto web ligero sin la sobrecarga de 6 capas ni dependencias de MediatR/CQRS.
+### 2. `CreditOrchestrator.cs`
+- **Análisis de Intención**:
+  - Si el usuario realiza una consulta sobre requisitos, tasas o condiciones generales y no incluye un DNI, deriva automáticamente a `Agente-evaluacion-documental`.
+  - Si el mensaje incluye un DNI, solicita evaluación o forma parte de la conversación financiera, lo deriva a `agente-evaluacion-crediticia`.
+- **Desacoplamiento Total**: La lógica cognitiva y los prompts no están quemados en C#; residen en Azure AI Foundry para fácil gobernanza y actualización.
 
-* **Archivo**: `AGNT.WebappOrchestrator.csproj`
-* **Target Framework**: `net8.0` (LTS instalada).
-* **Paquetes NuGet instalados**:
-  * `Azure.AI.Projects` (v2.1.0-beta.4): SDK oficial de Azure AI Foundry.
-  * `Azure.Identity` (v1.21.0): Autenticación vía `DefaultAzureCredential`.
-  * `Swashbuckle.AspNetCore` (v6.5.0): Documentación interactiva Swagger.
+### 3. `FoundryAgentClient.cs`
+- **Autenticación Segura con `AzureCliCredential`**: Se autentica utilizando las credenciales activas de Azure CLI (`az login`), evitando exponer llaves estáticas o secretos en el código.
+- **Gestión de Hilos Multi-Turno (`ProjectConversationsClient`)**: Mantiene un diccionario en memoria (`ConcurrentDictionary<string, string>`) que enlaza el `conversationId` del chat con el hilo nativo de Azure AI Foundry, garantizando que el agente recuerde turnos anteriores.
+- **Formateo Visual de Salida (`FormatAgentOutput`)**: Detecta cuando el agente en Foundry responde en formato JSON estructurado y lo convierte en una tarjeta de presentación con formato Markdown e íconos (`✅`, `⚠️`, cuota mensual y código de validación).
+- **Modo Contingencia (`UseMock`)**: Permite alternar a simulación local para desarrollo desconectado.
 
----
-
-### Paso 2: Diseñar los Modelos y el Activity Protocol (`Models.cs`)
-Microsoft 365 Agents Playground utiliza el **Bot Framework Activity Protocol**. Para comunicarse bidireccionalmente se crearon dos grupos de modelos:
-
-1. **Modelos de Bot Framework / Teams**:
-   * `BotActivity`: Representa el mensaje entrante del usuario (texto, remitente `From`, identificador de chat `Conversation`, y la URL de retorno `ServiceUrl`).
-   * `OutgoingActivity`: El paquete completo que el playground necesita para renderizar la burbuja (incluye `From` con rol bot, `Recipient`, `ReplyToId` y `Timestamp`).
-2. **Modelos de Negocio**:
-   * `CreditInfo`: Guarda DNI, Monto, Actividad Económica y Plazo. Cuenta con la propiedad `HasRequiredData` que verifica si se tienen los 3 datos requeridos.
-   * `ChatRequest` y `ChatResponse`: Para permitir pruebas directas por API REST (Swagger/Postman).
+### 4. `Models.cs`
+- Define los registros de transporte del Bot Framework (`BotActivity`, `BotAccount`, `BotConversation`, `OutgoingActivity`) y los modelos REST (`ChatRequest`, `ChatResponse`).
 
 ---
 
-### Paso 3: Crear el Cliente de Azure AI Foundry (`FoundryAgentClient.cs`)
-Permite invocar a los agentes configurados en Azure AI Foundry:
-
-* **Modo Producción**: Utiliza `AIProjectClient` y `AgentsClient` para crear un hilo de conversación (`CreateThreadAsync`), enviar el mensaje y ejecutar el agente designado (`CreateRunAsync`).
-* **Modo Simulación (`UseMock: true`)**: Permite ejecutar el sistema de forma 100% funcional localmente sin requerir credenciales ni saldo activo en Azure. Simula las respuestas del `Agente-consultas-generales` y del `agente-evaluacion-crediticia` calculando cuota mensual estimada y score crediticio en base a la actividad económica indicada.
-
----
-
-### Paso 4: Implementar el Orquestador y Reglas de Negocio (`CreditOrchestrator.cs`)
-El orquestador procesa el texto en lenguaje natural del usuario siguiendo 4 momentos clave:
-
-1. **Extracción Conversacional (Cero Documentos)**:
-   * Extrae el DNI buscando secuencias de 8 dígitos con Regex.
-   * Extrae el monto identificando patrones monetarios (ej. `S/ 5,000`, `10000 soles`).
-   * Detecta actividades económicas clave en el texto (comercio, bodega, transporte, restaurante, etc.).
-2. **Validación de Consultas Generales**:
-   * Si el usuario solo saluda ("hola", "buenas tardes") o hace preguntas generales, enruta al `Agente-consultas-generales`.
-3. **Regla de Oro: Solicitar Actividad Económica**:
-   * Si el usuario escribe DNI y monto pero **no indicó su actividad económica**, el orquestador no evalúa de inmediato, sino que responde solicitándola expresamente:
-     > *"¡Hola! Para realizar tu evaluación crediticia sin requerir ningún documento físico ni papeleos, por favor indícame tu **actividad económica** o rubro de tu negocio (por ejemplo: bodega, transporte, comercio, restaurante, servicios, etc.)."*
-4. **Enrutamiento y Evaluación**:
-   * Cuando se cuenta con DNI, Monto y Actividad Económica, invoca al `agente-evaluacion-crediticia` en Foundry para generar la aprobación.
-
----
-
-### Paso 5: Implementar los Endpoints y el Conector M365 (`Program.cs`)
-En `Program.cs` se configuran los endpoints de la Minimal API:
-
-1. **`POST /api/messages` (Para `@microsoft/m365agentsplayground`)**:
-   * **Manejo de Bienvenida**: Detecta el evento `conversationUpdate` (cuando el usuario entra al chat) y envía un mensaje de bienvenida informando los requisitos.
-   * **Manejo de Mensajes**: Procesa el texto con `CreditOrchestrator`.
-   * **Envío al Connector del Playground (`TrySendToConnectorAsync`)**:
-     * El Playground no lee la respuesta directamente del cuerpo HTTP, sino que espera un `POST` en su conector local:
-       $$\text{POST } \texttt{\{ServiceUrl\}/v3/conversations/\{convId\}/activities}$$
-     * La función `TrySendToConnectorAsync` despacha el `OutgoingActivity` hacia dicha URL para que la interfaz visual de Teams pinte la burbuja en tiempo real.
-2. **`POST /api/chat` (Para Swagger y pruebas REST)**:
-   * Endpoint simple que recibe `{ "message": "..." }` y retorna `{ "response": "...", "agent": "..." }`.
-
----
-
-### Paso 6: Configuración del Sistema (`appsettings.json`)
-Contiene la configuración de los agentes en Azure AI Foundry:
+## ⚙️ Configuración (`appsettings.json`)
 
 ```json
 {
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "Urls": "http://localhost:5000",
+
   "AzureAIFoundry": {
-    "Endpoint": "https://<tu-recurso>.services.ai.azure.com/api/projects/<tu-proyecto>",
+    "Endpoint": "https://azfoundry-poc001.services.ai.azure.com/api/projects/proy-agentes-poc",
     "UseMock": false,
     "Agents": {
       "Credit": "agente-evaluacion-crediticia",
-      "General": "Agente-consultas-generales"
+      "General": "Agente-evaluacion-documental"
     }
   }
 }
 ```
 
-En `appsettings.Development.json` se encuentra `"UseMock": true` para desarrollo y presentaciones locales.
+---
+
+## 🚀 Guía de Inicialización y Ejecución
+
+### Prerrequisitos
+- **.NET 8 SDK** instalado.
+- **Node.js** (v18+) con `npx`.
+- **Azure CLI** instalado.
 
 ---
 
-## 🚀 Cómo Ejecutar y Probar
+### Paso 1: Autenticación en Azure CLI
+Inicia sesión con la cuenta autorizada en el proyecto de Azure AI Foundry:
+```powershell
+az login
+```
 
-### 1. Iniciar el Orquestador
-En una terminal en esta carpeta:
+---
+
+### Paso 2: Iniciar el Orquestador Web (.NET 8)
+En una terminal situada en la raíz del proyecto:
 ```powershell
 dotnet run
 ```
-*La aplicación iniciará escuchando en `http://localhost:5000`.*
-
-### 2. Abrir Microsoft 365 Agents Playground
-En otra terminal:
-```powershell
-npx @microsoft/m365agentsplayground -e http://localhost:5000/api/messages
-```
-
-Se abrirá automáticamente la interfaz web en tu navegador.
+*El servicio iniciará en `http://localhost:5000` y desplegará Swagger UI en la raíz.*
 
 ---
 
-## 💬 Guión de Demostración en el Chat
+### Paso 3: Iniciar Microsoft 365 Agents Playground
+En una segunda terminal:
+```powershell
+npx @microsoft/m365agentsplayground -e http://localhost:5000/api/messages
+```
+Se abrirá automáticamente el navegador con la interfaz de chat emulando Microsoft Teams.
 
-| Turno | Mensaje del Usuario | Respuesta del Asistente | Agente Invocado |
-| :--- | :--- | :--- | :--- |
-| **1. Saludo** | `Hola` | Saluda y explica que solo se necesita DNI, monto y actividad económica (cero documentos). | `Agente-consultas-generales` |
-| **2. Datos incompletos** | `Mi DNI es 45892134 y quiero 15000 soles` | **Detecta la falta de actividad económica** y pide que se especifique el rubro del negocio o empleo. | `CreditOrchestrator` (Regla de Negocio) |
-| **3. Completa actividad** | `Tengo un restaurante de comida criolla` | Retorna el dictamen de crédito con aprobación, cuota mensual estimada y score crediticio. | `agente-evaluacion-crediticia` |
+---
+
+## 🧪 Casos de Prueba y Respuestas Esperadas
+
+A continuación se detallan los escenarios validados en vivo contra Azure AI Foundry:
+
+### Caso 1: Bienvenida al Entrar al Chat
+* **Evento**: El usuario abre la conversación.
+* **Respuesta del Bot**:
+  > ¡Hola! 👋 Bienvenido al Asistente de Evaluación Crediticia en Microsoft 365 Agents Playground.  
+  > Para evaluar tu crédito 100% digital (sin requerir documentos físicos ni papeleos), por favor indícame tu **número de DNI**, el **monto** que deseas solicitar y tu **actividad económica**.
+
+---
+
+### Caso 2: Consulta Informativa de Requisitos (Sin DNI)
+* **Entrada**: `Hola, ¿qué requisitos y condiciones piden para acceder a un crédito con ustedes?`
+* **Agente**: `Agente-evaluacion-documental`
+* **Respuesta Esperada**:
+  > Hola. Los requisitos para solicitar un crédito dependen de la entidad y del tipo de crédito, pero generalmente incluyen: Documento de identidad vigente, comprobante de ingresos, historial favorable...
+
+---
+
+### Caso 3: Evaluación Completa — Cliente Habilitado (Aprobado)
+* **Entrada**: `Hola, mi DNI es 12345678, requiero 10000 soles y tengo una bodega de abarrotes.`
+* **Agente**: `agente-evaluacion-crediticia`
+* **Comportamiento**: Invoca la herramienta OpenAPI de validación (DNI `12345678` retorna `isEnabled: true`), calcula el scoring de riesgo medio y dictamina.
+* **Respuesta Esperada**:
+  > ✅ **Evaluación Crediticia — Azure AI Foundry**  
+  > • **Resultado**: APROBADO  
+  > • **Score crediticio**: 600 (Riesgo: MEDIO)  
+  > • **Monto aprobado**: S/ 10,000.00 PEN  
+  > • **Cuota estimada**: S/ 931.14 / mes  
+  > • **Validación**: VAL-20261105-000011  
+  > • **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.
+
+---
+
+### Caso 4: Cliente en Lista Negra / No Habilitado
+* **Entrada**: `Buenas noches, solicito un crédito de 15000 soles, mi DNI es 87654321 y trabajo en transporte de carga.`
+* **Agente**: `agente-evaluacion-crediticia`
+* **Comportamiento**: La herramienta OpenAPI detecta que el DNI `87654321` se encuentra inhabilitado (`isEnabled: false`).
+* **Respuesta Esperada**:
+  > *El cliente no está habilitado.*
+
+---
+
+### Caso 5: Conversación Multi-Turno (Memoria Contextual)
+Demuestra que el orquestador y Azure AI Foundry conservan el contexto de la sesión:
+
+* **Turno 1 (Usuario)**: `hola, mi dni es 12345678`
+* **Respuesta Turno 1 (Bot)**:
+  > *El cliente está habilitado. Para continuar con la evaluación crediticia, indica el monto solicitado y la actividad del negocio.*
+* **Turno 2 (Usuario)**: `quiero un monto de mil soles y soy comerciante`
+* **Respuesta Turno 2 (Bot)**:
+  > ✅ **Evaluación Crediticia — Azure AI Foundry**  
+  > • **Resultado**: APROBADO  
+  > • **Score crediticio**: 600 (Riesgo: MEDIO)  
+  > • **Monto aprobado**: S/ 1,000.00 PEN  
+  > • **Cuota estimada**: S/ 93.11 / mes  
+  > • **Validación**: VAL-20261105-000012  
+  > • **Modalidad**: 100% digital sin requerir documentos físicos ni papeleos.
+
+---
+
+### Caso 6: Chitchat / Saludo Amigable
+* **Entrada**: `Hola como estas?`
+* **Respuesta Esperada**:
+  > *¡Hola! Muy bien, gracias 😊 ¿Y tú, cómo estás?*
+
+---
+
+## 📦 Repositorio y Versionamiento
+- **Repositorio Oficial**: [GitHub - Edinsondamian/AGNT-webapp-orchestrator](https://github.com/Edinsondamian/AGNT-webapp-orchestrator)
+- **Rama principal**: `main`
