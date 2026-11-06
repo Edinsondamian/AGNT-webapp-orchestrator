@@ -64,14 +64,30 @@ flowchart TD
   - **Tolerancia a Faltas Ortográficas y Jergas**: El LLM entiende cualquier variación lingüística de forma natural.
   - **Memoria Unificada**: Todo el diálogo se mantiene en el mismo hilo (`ProjectConversation`), evitando que saltos entre agentes borren el contexto del usuario.
 
-### 3. `FoundryAgentClient.cs`
-- **Autenticación Segura con `AzureCliCredential`**: Se autentica utilizando las credenciales activas de Azure CLI (`az login`), sin llaves estáticas ni secretos quemados en el código.
-- **Gestión de Hilos Multi-Turno (`ProjectConversationsClient`)**: Mantiene un diccionario en memoria (`ConcurrentDictionary<string, string>`) que enlaza el `conversationId` del chat con el hilo nativo de Azure AI Foundry.
-- **Formateo Visual de Salida (`FormatAgentOutput`)**: Detecta cuando el agente en Foundry responde en formato JSON estructurado y lo convierte en una tarjeta legible para Teams con formato Markdown e íconos (`✅`, `⚠️`, cuota mensual y código de validación).
-- **Modo Contingencia (`UseMock`)**: Permite alternar a simulación local para desarrollo desconectado.
+### 3. `FoundryAgentClient.cs` y el rol de `AIProjectClient`
+Es el cliente oficial de integración con **Azure AI Foundry** (`Azure.AI.Projects`). Actúa como la puerta de acceso central hacia los recursos de IA del proyecto en la nube:
 
-### 4. `Models.cs`
-- Define los registros de transporte del Bot Framework (`BotActivity`, `BotAccount`, `BotConversation`, `OutgoingActivity`) y los modelos REST (`ChatRequest`, `ChatResponse`).
+```mermaid
+flowchart TD
+    A["🔐 AzureCliCredential<br/>(az login)"] --> B["⚡ AIProjectClient<br/>(Punto de Entrada al Proyecto en Foundry)"]
+    B --> C["🤖 ProjectOpenAIClient<br/>Invoca al 'agente-evaluacion-crediticia'"]
+    B --> D["🧵 ProjectConversationsClient<br/>Crea y mantiene hilos multi-turno"]
+    B --> E["🛠️ Ejecución Transparente de Tools<br/>API OpenAPI de Blacklist / Habilitación"]
+```
+
+**¿Qué hace `AIProjectClient` en el proyecto?**
+- **Autenticación sin secretos expuestos**: Negocia tokens con Microsoft Entra ID mediante `AzureCliCredential` sin requerir API keys estáticas en el código.
+- **Invocación de Agentes**: Obtiene clientes especializados (`ProjectOpenAIClient`) para despachar mensajes a `agente-evaluacion-crediticia`.
+- **Persistencia de Conversaciones (`ProjectConversation`)**: Crea y gestiona los hilos de diálogo en Azure, permitiendo que el LLM recuerde los turnos anteriores sin requerir una base de datos local.
+- **Orquestación de Herramientas**: Permite que las herramientas OpenAPI conectadas al agente (como la validación de listas negras) se ejecuten en la nube de forma transparente.
+- **Formateo Visual de Salida (`FormatAgentOutput`)**: Transforma la respuesta JSON del agente en una tarjeta amigable para Teams utilizando las plantillas centralizadas de `Constants.cs`.
+- **Modo Contingencia (`UseMock`)**: Simula evaluaciones realistas en desarrollo local sin consumir saldo de Azure.
+
+### 4. `Constants.cs`
+- Centraliza los textos de bienvenida, mensajes de orientación, respuestas mock y la plantilla de tarjeta Markdown de crédito, evitando cadenas de texto quemadas dentro de la lógica.
+
+### 5. `Models.cs`
+- Define los registros estrictamente necesarios para el Bot Framework Activity Protocol de Microsoft Teams / Playground: `BotActivity`, `BotAccount`, `BotConversation` y `OutgoingActivity`.
 
 ---
 
